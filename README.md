@@ -242,3 +242,99 @@ $ docker commit <コンテナ名 or コンテナID> <イメージ名>:<タグ名
 ```shell
 $ docker run --name static-site -e AUTHOR="Kohei Ikeda" -d dockersamples/static-site
 ```
+
+## Automated Build
+
+### Automated Buildの設定
+
+参考: https://qiita.com/Brutus/items/19f02df409e859406914
+
+Automated Buildを設定することで、GitHubにDockerfileをpushすると、自動でイメージのビルドが行われる。
+
+## Docker Machine
+
+- Docker Engineを搭載した仮想マシンの作成、起動、停止、再起動などをコマンドラインから実行できるツール。
+- ローカルPCだけでなく、リモートのクラウドプロバイダでDockerホストを立ち上げ管理することも可能。
+
+### Docker for Windowsを使用している場合の注意点
+
+`Hyper-V`が有効になっていると下記のようなエラーが起こる。
+
+```shell
+$ docker-machine create create-test
+Creating CA: C:\Users\kouhei.ikeda\.docker\machine\certs\ca.pem
+Creating client certificate: C:\Users\kouhei.ikeda\.docker\machine\certs\cert.pem
+Running pre-create checks...
+Error with pre-create check: "VBoxManage not found. Make sure VirtualBox is installed and VBoxManage is in the path"
+You can further specify your shell with either 'cmd' or 'powershell' with the --shell flag.
+```
+
+エラーを回避するには、`--driver`を使用する。
+
+`Hyper-Vマネージャー`で`仮想スイッチマネージャー`からを仮想スイッチ（外部）の作成をしてから、管理者権限で立ち上げたPowerShellで実行
+
+```shell
+$ docker-machine create --driver hyperv create-test
+```
+
+### Dokcer Machineを使用したDockerホストの管理
+
+Dockerホストの一覧を確認する
+
+```shell
+$ docker-machine ls
+NAME   ACTIVE   DRIVER   STATE   URL   SWARM   DOCKER   ERRORS
+```
+
+Dockerホストの作成
+
+```shell
+# Hyper-V(Windows)の場合
+$ docker-machine create --driver hyperv <Dockerホスト名>
+# VirtualBoxの場合
+$ docker-machine create --driver virtualbox <Dockerホスト名>
+```
+
+操作対象のDockerホストを指定する(環境変数を設定する)ためのコマンドを調べる
+
+
+```shell
+# Windowsの場合
+$ docker-machine env <Dockerホスト名> --shell powershell
+# 下記を実行することで環境変数をまとめて設定できる
+$ & "C:\Program Files\Docker\Docker\Resources\bin\docker-machine.exe" env <Dockerホスト名> --shell powershell | Invoke-Expression
+
+# Macの場合
+$ docker-machine env <Dockerホスト名>
+# 下記を実行することで環境変数をまとめて設定できる
+$ eval $(docker-machine env <Dockerホスト名>)
+```
+
+環境変数を削除するためのコマンドを調べる
+
+```shell
+# Windowsの場合
+$ docker-machine env -u --shell powershell
+# 下記を実行することで設定した環境変数を削除できる
+$ & "C:\Program Files\Docker\Docker\Resources\bin\docker-machine.exe" env -u --shell powershell | Invoke-Expression
+
+# Macの場合
+$ docker-machine env -u
+# 下記を実行することで設定した環境変数を削除できる
+$ eval $(docker-machine env -u)
+```
+
+
+
+DockerホストにSSH接続する
+
+```shell
+$ docker ssh <Dockerホスト名>
+```
+
+Dockerホストのipアドレスを確認する
+
+```shell
+$ docker-machine ip <Dockerホスト名>
+```
+
