@@ -324,7 +324,11 @@ $ docker-machine env -u
 $ eval $(docker-machine env -u)
 ```
 
+Dockerホストの削除
 
+```shell
+$ docker-machine rm <Dockerホスト名>
+```
 
 DockerホストにSSH接続する
 
@@ -337,4 +341,10 @@ Dockerホストのipアドレスを確認する
 ```shell
 $ docker-machine ip <Dockerホスト名>
 ```
+
+AWSやGCPへのDockerホストのプロビジョニングもできる
+
+## Dockerのネットワーク
+
+### デフォルトのブリッジネットワークとユーザー定義のブリッジネットワーク
 
