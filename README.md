@@ -6,6 +6,12 @@
 
 ### `docker run`コマンド
 
+例:
+
+```shell
+$ docker run hello-world
+```
+
 `docker run`コマンドは3つのコマンドに分割できる
 
 - `docker pull` : イメージの取得
@@ -125,7 +131,7 @@ $ docker run --name <コンテナ名> -d \
 
 ```shell
 $ docker run --name <コンテナ名> -d \
-  -v <ホスト側のディレクトリ>:<コンテナ側のマウントポイント>:<ポイント>
+  -v <ホスト側のディレクトリ>:<コンテナ側のマウントポイント>:<オプション>
   -p <ホスト側のポート番号>:<コンテナ側のポート番号> \
   <イメージ名>
 ```
@@ -206,7 +212,7 @@ COPY default.conf /etc/nginx/conf.d/default.conf
   - ホストの入力をコンテナの標準出力をつなげる
   - iはinteractiveの略。
   - 対話するようにシェルなどでコンテナ内で操作ができる
-  
+
 - `-t` オプション
   - コンテナの標準出力とホストの出力をつなげる
   - tty(端末デバイス)を割り当てている
@@ -224,6 +230,8 @@ $ docker commit <コンテナ名 or コンテナID> <イメージ名>:<タグ名
 ### linkオプションの使い方(※レガシー)
 
 - レガシーな使い方のため、極力使わない方がよい。
+
+- `docker network`を使うべき。
 
 - ```shell
   docker run --link <コンテナ名 or コンテナID>:<リンク先コンテナの別名> ...
@@ -295,6 +303,18 @@ $ docker-machine create --driver hyperv <Dockerホスト名>
 $ docker-machine create --driver virtualbox <Dockerホスト名>
 ```
 
+Dockerホストの起動
+
+```shell
+$ docker-machine start <Docker ホスト名>
+```
+
+Dockerホストの停止
+
+```shell
+$ docker-machine stop <Docker ホスト名>
+```
+
 操作対象のDockerホストを指定する(環境変数を設定する)ためのコマンドを調べる
 
 
@@ -346,5 +366,315 @@ AWSやGCPへのDockerホストのプロビジョニングもできる
 
 ## Dockerのネットワーク
 
+参考: https://qiita.com/TsutomuNakamura/items/ed046ee21caca4a2ffd9
+
 ### デフォルトのブリッジネットワークとユーザー定義のブリッジネットワーク
+
+`docker network ls`コマンドでネットワーク一覧を確認できる。Dockerがインストールされた時点で`bridge`、`host`、 `null`の3つのDRIVERが存在する。
+
+```shell
+$ docker network ls
+NETWORK ID          NAME                DRIVER              SCOPE
+7c91220232cd        bridge              bridge              local
+781cea8d8cdb        host                host                local
+336ae8279a1d        none                null                local
+```
+
+### bridge
+
+ネットワークの詳細については下記で確認できる。
+
+```shell
+$ docker network inspect <ネットワーク名 or ネットワークID>
+# 例
+$ docker network inspect bridge
+```
+
+試しにコンテナを追加してみて、attachでコンテナ内に入って、ipアドレスを確認してみる。
+
+```shell
+$ docker run -itd --name alpine1 alpine /bin/sh
+$ docker attach alpine1
+# コンテナ内に入った
+$ ip addr show
+# ...省略...
+inet 172.17.0.2/16
+```
+
+もう一つコンテナを追加してさきほど作成した`alpine1`にpingを送ってみると通信できていることが確認できる。
+
+```shell
+$ docker run -itd --name alpine2 alpine /bin/sh
+$ docker attach alpine2
+# コンテナ内に入った
+$ ip addr show
+...省略...
+inet 172.17.0.3/16
+# alpin1にpingを送る
+$ ping -w 3 172.17.0.2
+PING 172.17.0.2 (172.17.0.2): 56 data bytes
+64 bytes from 172.17.0.2: seq=0 ttl=64 time=0.539 ms
+64 bytes from 172.17.0.2: seq=1 ttl=64 time=0.175 ms
+64 bytes from 172.17.0.2: seq=2 ttl=64 time=0.188 ms
+# コンテナ名でalpine1にpingを送ると失敗する
+$ ping -w 3 alpine1
+ping: bad address 'alpine1'
+```
+
+コンテナ名で接続するためには、ユーザー定義のブリッジネットワークを作成する必要がある。
+
+### ユーザー定義のブリッジネットワーク
+
+#### ユーザー定義のブリッジネットワークの作成方法
+
+```shell
+$ docker network create <ネットワーク名>
+```
+
+例：
+
+```shell
+$ docker network create my_nw
+# my_nwという新しいブリッジネットワークが作成されているのを確認
+$ docker network ls
+NETWORK ID          NAME                DRIVER              SCOPE
+7c91220232cd        bridge              bridge              local
+781cea8d8cdb        host                host                local
+d0b7d46a90a9        my_nw               bridge              local
+336ae8279a1d        none                null                local
+```
+
+#### ユーザー定義のブリッジネットワークとコンテナの接続方法
+
+```shell
+$ docker network connect <ネットワーク名> <コンテナ名>
+```
+
+例：
+
+```shell
+# my_nwというネットワークにalpine1コンテナを接続
+$ docker network connect my_nw alpine1
+# my_nwというネットワークにalpine2コンテナを接続
+$ docker network connect my_nw alpine2
+```
+
+#### コンテナ作成時にユーザー定義のネットワークと接続する方法
+
+```shell
+$ docker run --name <コンテナ名> --network <ネットワーク名> <イメージ名>
+```
+
+例:
+
+```shell
+$ docker run -itd --name alpine3 --network my_nw alpine
+```
+
+#### コンテナ名で接続できるか確認
+
+```shell
+$ docker network inspect my_nw
+...省略...
+"Containers": {
+    "61909d8e24e1a42e7d48e769827f1228e8e4af92d63efa47af210c96dafc0185": {
+        "Name": "alpine2",
+        "EndpointID": "4f3eb4f48ae03e6cab10e812938a2a6d692f1694d9e77b980e9cd21873172403",
+        "MacAddress": "02:42:ac:12:00:04",
+        "IPv4Address": "172.18.0.4/16",
+        "IPv6Address": ""
+    },
+    "6856d78b1d64dd9f92e285e19b5ec21cf0ed2e468a1da9547b78fc6cb6aca681": {
+        "Name": "alpine1",
+        "EndpointID": "e8b85c05206a6ea1c882cb462bbc9add6139ca992a6ea82db7ca92abf3c33852",
+        "MacAddress": "02:42:ac:12:00:03",
+        "IPv4Address": "172.18.0.3/16",
+        "IPv6Address": ""
+    },
+    "f60f180ec5f296e5d93f8a2761f87309096a8a659e0cd7ed9c3231ab9975d7a3": {
+        "Name": "alpine3",
+        "EndpointID": "0cdbc0c59fdb801200e304347615e672a609dd407f6545d3119931125de9508d",
+        "MacAddress": "02:42:ac:12:00:02",
+        "IPv4Address": "172.18.0.2/16",
+        "IPv6Address": ""
+    }
+}
+...省略...
+
+$ docker attach alpine2
+# コンテナ内に入った
+$ ping -w 3 alpine1
+PING alpine1 (172.18.0.3): 56 data bytes
+64 bytes from 172.18.0.3: seq=0 ttl=64 time=0.051 ms
+64 bytes from 172.18.0.3: seq=1 ttl=64 time=0.069 ms
+64 bytes from 172.18.0.3: seq=2 ttl=64 time=0.159 ms
+$ ping -w 3 alpine3
+PING alpine3 (172.18.0.2): 56 data bytes
+64 bytes from 172.18.0.2: seq=0 ttl=64 time=0.082 ms
+64 bytes from 172.18.0.2: seq=1 ttl=64 time=0.080 ms
+64 bytes from 172.18.0.2: seq=2 ttl=64 time=0.226 ms
+```
+
+コンテナ名でネットワーク接続できるようになった。
+
+#### ネットワークからコンテナを切断する方法
+
+```shell
+$ docker network disconnect <ネットワーク名> <コンテナ名>
+```
+
+コンテナのネットワーク状況を確認
+
+```shell
+$ docker inspect alpine2
+...省略...
+"Networks": {
+    "bridge": {
+        "IPAMConfig": null,
+        "Links": null,
+        "Aliases": null,
+        "NetworkID": "7c91220232cdc4bdd644c80f936372947617090a08393562edba81268687b2ce",
+        "EndpointID": "b2d746e4550a2bebdb263a8ec6f5c08ce8a5754d676557d0c122ccbc1f814d66",
+        "Gateway": "172.17.0.1",
+        "IPAddress": "172.17.0.3",
+        "IPPrefixLen": 16,
+        "IPv6Gateway": "",
+        "GlobalIPv6Address": "",
+        "GlobalIPv6PrefixLen": 0,
+        "MacAddress": "02:42:ac:11:00:03",
+        "DriverOpts": null
+    },
+    "my_nw": {
+        "IPAMConfig": {},
+        "Links": null,
+        "Aliases": [
+            "61909d8e24e1"
+        ],
+        "NetworkID": "d0b7d46a90a9c0f2b606d786fd9a3e4148b05b411334db6302b65480bd825ace",
+        "EndpointID": "25e20b7739a6534612d3a9aa2424720e0b0447b820c17d121133977c3df1b08c",
+        "Gateway": "172.18.0.1",
+        "IPAddress": "172.18.0.4",
+        "IPPrefixLen": 16,
+        "IPv6Gateway": "",
+        "GlobalIPv6Address": "",
+        "GlobalIPv6PrefixLen": 0,
+        "MacAddress": "02:42:ac:12:00:04",
+        "DriverOpts": {}
+    }
+}
+```
+
+`bridge`と`my_nw`というふたつのネットワークに接続していることがわかる。
+
+`alpine2`コンテナから、デフォルトの`bridge`ネットワークを切断する。
+
+```shell
+$ docker network disconnect bridge alpine2
+# 切断できたか確認
+$ docker inspect alpine2
+...省略...
+"Networks": {
+    "my_nw": {
+        "IPAMConfig": {},
+        "Links": null,
+        "Aliases": [
+            "61909d8e24e1"
+        ],
+        "NetworkID": "d0b7d46a90a9c0f2b606d786fd9a3e4148b05b411334db6302b65480bd825ace",
+        "EndpointID": "25e20b7739a6534612d3a9aa2424720e0b0447b820c17d121133977c3df1b08c",
+        "Gateway": "172.18.0.1",
+        "IPAddress": "172.18.0.4",
+        "IPPrefixLen": 16,
+        "IPv6Gateway": "",
+        "GlobalIPv6Address": "",
+        "GlobalIPv6PrefixLen": 0,
+        "MacAddress": "02:42:ac:12:00:04",
+        "DriverOpts": {}
+    }
+}
+```
+
+### noneネットワーク
+
+noneネットワークはnullなネットワークドライバの実装。ネットワーク接続を必要としないコンテナを作成する場合に使用される。
+
+noneネットワークに接続したコンテナを作成
+
+```shell
+$ docker run -itd --name none --network none alpine /bin/sh
+```
+
+ネットワーク構成の確認
+
+```shell
+$ docker inspect none
+...省略...
+"Networks": {
+    "none": {
+        "IPAMConfig": null,
+        "Links": null,
+        "Aliases": null,
+        "NetworkID": "336ae8279a1da8c2653b5a4d9e8596b38c72a115a0af8e2c7293d2a39cb96972",
+        "EndpointID": "94864ab640f6afaf9e4d5a84b9143d47dada176b22ed9e9ad321a07ff11ce8e3",
+        "Gateway": "",
+        "IPAddress": "",
+        "IPPrefixLen": 0,
+        "IPv6Gateway": "",
+        "GlobalIPv6Address": "",
+        "GlobalIPv6PrefixLen": 0,
+        "MacAddress": "",
+        "DriverOpts": null
+    }
+}
+```
+
+noneコンテナにアタッチしてネットワーク構成の確認
+
+```shell
+$ docker attach none
+# コンテナ内に入った
+$ ip addr show
+1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN qlen 1000
+    link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00
+    inet 127.0.0.1/8 scope host lo
+       valid_lft forever preferred_lft forever
+2: sit0@NONE: <NOARP> mtu 1480 qdisc noop state DOWN qlen 1000
+    link/sit 0.0.0.0 brd 0.0.0.0
+```
+
+ループバックインターフェース以外にネットワークインターフェースを持たないことが確認できた。
+
+### hostネットワーク
+
+hostネットワークは、Dockerホストと同じネットワークにスタックするドライバで、Dockerホストマシンと同じネットワークインタフェース、IPアドレスを持つようになる。
+
+DockerホストのIPを確認
+
+```shell
+$ docker-machine ip nw-vm1
+192.168.232.157
+```
+
+```shell
+# ssh接続
+$ docker-machine ssh nw-vm1
+# コンテナ作成(-pフラグを使用していないことに注目)
+$ docker run -d --name web --network host nginx
+```
+
+`192.168.232.157`にアクセスするとnginxのデフォルトページが表示される。
+
+`-p`フラグを使用してポートを開放する必要がない。
+
+### Standalone Swarmのオーバーレイネットワーク
+
+```shell
+$ docker run -d --name consul -p 8500:8500 -h consul consul agent -server -bootstrap -client 0.0.0.0
+```
+
+`--name consul` : コンテナ名
+
+`-h consul` : ホスト名
+
+`consul agent -server -bootstrap -client 0.0.0.0` : イメージ名 + コンテナ内で呼び出すコマンド
 
