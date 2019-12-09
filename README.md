@@ -214,6 +214,7 @@ COPY default.conf /etc/nginx/conf.d/default.conf
   - 対話するようにシェルなどでコンテナ内で操作ができる
 
 - `-t` オプション
+  
   - コンテナの標準出力とホストの出力をつなげる
   - tty(端末デバイス)を割り当てている
   - -tはttyの略。
@@ -666,15 +667,297 @@ $ docker run -d --name web --network host nginx
 
 `-p`フラグを使用してポートを開放する必要がない。
 
-### Standalone Swarmのオーバーレイネットワーク
+## Dockerのデータ管理
+
+3種類のデータ管理方法がある
+
+- volume
+- bind mount
+- tmpfs
+
+### volumeの使い方
+
+#### volumeを使うテスト環境のためにホスト作成
 
 ```shell
-$ docker run -d --name consul -p 8500:8500 -h consul consul agent -server -bootstrap -client 0.0.0.0
+$ docker-machine create --driver hyperv vol-test
 ```
 
-`--name consul` : コンテナ名
+#### 作成したホスト環境にssh接続
 
-`-h consul` : ホスト名
+```shell
+$ docker-machine ssh vol-test
+```
 
-`consul agent -server -bootstrap -client 0.0.0.0` : イメージ名 + コンテナ内で呼び出すコマンド
+#### volumeを作成する
+
+```shell
+$ docker volume create my-vol
+```
+
+#### 作成されたvolumeを確認する
+
+```shell
+$ docker volume ls
+DRIVER              VOLUME NAME
+local               my-vol
+```
+
+#### 作成したvolumeの詳細を調べる
+
+```shell
+$ docker volume inspect my-vol
+[
+    {
+        "CreatedAt": "2019-12-09T02:33:02Z",
+        "Driver": "local",
+        "Labels": {},
+        "Mountpoint": "/mnt/sda1/var/lib/docker/volumes/my-vol/_data",
+        "Name": "my-vol",
+        "Options": {},
+        "Scope": "local"
+    }
+]
+```
+
+#### volumeを削除する
+
+```shell
+$ docker volume rm my-vol
+```
+
+#### コンテナにvolumeをマウントする方法
+
+##### -vオプション
+
+```shell
+$ docker run -itd --name mount-c1 -v vol1:/app nginx:latest
+```
+
+`-v vol1:/app` : `vol1`というvolumeが存在しない場合、新規に`vol1`というvolumeが作成される。コンテナ内のマウントポイントは`/app`。
+
+コンテナ情報を確認
+
+```shell
+$ docker inspect mount-c1
+...省略...
+"Mounts": [
+    {
+        "Type": "volume",
+        "Name": "vol1",
+        "Source": "/mnt/sda1/var/lib/docker/volumes/vol1/_data",
+        "Destination": "/app",
+        "Driver": "local",
+        "Mode": "z",
+        "RW": true,
+        "Propagation": ""
+    }
+]
+```
+
+mount-c1コンテナ内に入って、マウントした`/app`配下にファイルを作成してみる。
+
+```shell
+$ docker exec -it mount-c1 /bin/bash
+# mount-c1コンテナに入った
+$ df
+Filesystem     1K-blocks   Used Available Use% Mounted on
+overlay         18714000 181948  17542924   2% /
+tmpfs              65536      0     65536   0% /dev
+tmpfs             473632      0    473632   0% /sys/fs/cgroup
+shm                65536      0     65536   0% /dev/shm
+# /appが一つのファイルシステムとしてマウントされている
+/dev/sda1       18714000 181948  17542924   2% /app
+tmpfs             473632      0    473632   0% /proc/asound
+tmpfs             473632      0    473632   0% /proc/acpi
+tmpfs             473632      0    473632   0% /proc/scsi
+tmpfs             473632      0    473632   0% /sys/firmware
+# /app配下に適当なファイルを作成してみる
+$ touch /app/hogehoge
+```
+
+別のコンテナを`vol1`をマウント元として作成する。hogehogeファイルが存在しているか確認。
+
+```shell
+$ docker run -itd --name mount-c2 --mount source=vol1,target=/app nginx:latest
+```
+
+`--mount source=vol1,target=/app` : マウント元のvolumeをsourceに指定、マウント先を/appに指定。
+
+volumeは同じホスト内でないと使用できないことに注意。
+
+#### コンテナ起動時のvolumeマウント
+
+コンテナ起動時にvolumeを作成してマウントすると、マウント先(コンテナ内)のファイルがvolume内にコピーされる。
+
+`--mount source=copy-vol,destination=/etc/nginx ` のような使い方のほうが`-v`よりも推奨されている。
+
+```shell
+# copy-volというvolumeが存在しないため、copy-volというvolumeが作成された
+$ docker run -itd --name mount-c3 --mount source=copy-vol,destination=/etc/nginx nginx
+# copy-volの情報を確認
+$ docker volume inspect copy-vol
+[
+    {
+        "CreatedAt": "2019-12-09T06:49:48Z",
+        "Driver": "local",
+        "Labels": null,
+        "Mountpoint": "/mnt/sda1/var/lib/docker/volumes/copy-vol/_data",
+        "Name": "copy-vol",
+        "Options": null,
+        "Scope": "local"
+    }
+]
+# Mountpointのディレクトリの内容を確認
+# コンテナ側にあったファイルが格納されていることが確認できる
+$ sudo ls -la /var/lib/docker/volumes/copy-vol/_data
+total 48
+drwxr-xr-x    3 root     root          4096 Dec  9 06:49 .
+drwxr-xr-x    3 root     root          4096 Dec  9 06:49 ..
+drwxr-xr-x    2 root     root          4096 Dec  9 06:49 conf.d
+-rw-r--r--    1 root     root          1007 Nov 19 12:50 fastcgi_params
+-rw-r--r--    1 root     root          2837 Nov 19 12:50 koi-utf
+-rw-r--r--    1 root     root          2223 Nov 19 12:50 koi-win
+-rw-r--r--    1 root     root          5231 Nov 19 12:50 mime.types
+lrwxrwxrwx    1 root     root            22 Nov 19 12:50 modules -> /usr/lib/nginx/modules
+-rw-r--r--    1 root     root           643 Nov 19 12:50 nginx.conf
+-rw-r--r--    1 root     root           636 Nov 19 12:50 scgi_params
+-rw-r--r--    1 root     root           664 Nov 19 12:50 uwsgi_params
+-rw-r--r--    1 root     root          3610 Nov 19 12:50 win-utf
+```
+
+#### 読み取り専用でマウントする場合
+
+`--mount`を使用する場合
+
+```shell
+$ docker run -itd --name mount-c4 --mount source=copy-vol,destination=/etc/nginx,readonly nginx
+$ docker inspect mount-c4
+...省略...
+"Mounts": [
+    {
+        "Type": "volume",
+        "Name": "copy-vol",
+        "Source": "/mnt/sda1/var/lib/docker/volumes/copy-vol/_data",
+        "Destination": "/etc/nginx",
+        "Driver": "local",
+        "Mode": "z",
+        # "RW"がfalseになっている
+        "RW": false,
+        "Propagation": ""
+    }
+]
+```
+
+`-v`を使用する場合
+
+```shell
+$ docker run -itd --name mount-c5 -v copy-vol:/etc/nginx:ro nginx
+$ docker inspect mount-c4
+...省略...
+"Mounts": [
+    {
+        "Type": "volume",
+        "Name": "copy-vol",
+        "Source": "/mnt/sda1/var/lib/docker/volumes/copy-vol/_data",
+        "Destination": "/etc/nginx",
+        "Driver": "local",
+        "Mode": "ro",
+        # "RW"がfalseになっている
+        "RW": false,
+        "Propagation": ""
+    }
+]
+```
+
+### bind mountの使い方
+
+`-v`でカレントディレクトリに存在しないディレクトリをマウントする。
+
+```shell
+$ docker run -itd --name bind-test1 -v "$(pwd)"/source:/app nginx
+```
+
+`--mount`でカレントディレクトリに存在しないディレクトリをマウントする(エラーになる)。※`type=bind`と明示する必要がある。
+
+```shell
+$ docker run -itd --name bind-test2 --mount type=bind,source="$(pwd)"/source2,target=/app nginx
+# "$(pwd)"/source2が存在しないため、エラーが起こる
+docker: Error response from daemon: invalid mount config for type "bind": bind source path does not exist: /home/docker/source2.
+See 'docker run --help'.
+```
+
+bind mountしたときのコンテナの状態を確認
+
+```shell
+$ docker inspect bind-test1
+...省略...
+ "Mounts": [
+    {
+        # Typeがbindになっている
+        "Type": "bind",
+        # マウント元のディレクトリ
+        "Source": "/home/docker/source",
+        # マウント先のディレクトリ
+        "Destination": "/app",
+        "Mode": "",
+        # デフォルトだと読み書き可能な状態
+        "RW": true,
+        "Propagation": "rprivate"
+    }
+]
+```
+
+bind mountは、コンテナ側の既存ファイルをなくしてしまう可能性などがあるため、使い方に注意する。
+
+### tmpfs
+
+ホストのメモリ上にマウントする。ホストかコンテナが停止するとデータは開放され、tmpfsマウントが取り除かれる。
+
+`type=tmpfs`で指定する。
+
+```shell
+$ docker run -itd --name tmptest --mount type=tmpfs,destination=/app nginx
+# オプションをいろいろつけられる
+$ docker run -itd --name tmptest2 --mount type=tmpfs,destination=/app,tmpfs-size=500000000,tmpfs-mode=700 nginx
+```
+
+## Docker Compose
+
+Compose実行のステップ
+
+1. Dockerfileを用意するか、使用するイメージをDocker Hubなどに用意する
+2. docker-compose.ymlを定義する
+3. docker-compose upを実行する
+
+docker-compose.ymlの例
+
+```docker
+# docker-cmpose.ymlの例
+# docker-composeの形式のバージョン
+version: '3'
+services:
+  # サービス名（任意の名前をつけられる）
+  web:
+    # webサービス用のDockerfileが同じディレクトリにある
+    build: .
+    # コンテナ外部に公開するポートとマッピング先のポート
+    ports:
+    - "5000:5000"
+    # マウント
+    volumes:
+    # bind mount
+    - .:/code
+    # volume mount (volumesで定義している)
+    - logvolume01:/var/log
+    links
+    - redis
+  # サービス名（任意の名前をつけられる）
+  redis:
+    # imageをそのまま使用
+    image: redis
+# volumeの定義
+volumes:
+  logvolume01: {}
+```
 

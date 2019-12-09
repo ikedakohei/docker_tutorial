@@ -1,0 +1,26 @@
+# docker-cmpose.ymlの例
+# docker-composeの形式のバージョン
+version: '3'
+services:
+  # サービス名（任意の名前をつけられる）
+  web:
+    # webサービス用のDockerfileが同じディレクトリにある
+    build: .
+    # コンテナ外部に公開するポートとマッピング先のポート
+    ports:
+    - "5000:5000"
+    # マウント
+    volumes:
+    # bind mount
+    - .:/code
+    # volume mount (volumesで定義している)
+    - logvolume01:/var/log
+    links
+    - redis
+  # サービス名（任意の名前をつけられる）
+  redis:
+    # imageをそのまま使用
+    image: redis
+# volumeの定義
+volumes:
+  logvolume01: {}

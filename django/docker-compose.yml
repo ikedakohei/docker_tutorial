@@ -1,0 +1,16 @@
+version: '3'
+services:
+  db:
+    image: postgres
+  web:
+    build: .
+    # コンテナ起動時に実行されるコマンド
+    command: python3 manage.py runserver 0.0.0.0:8000
+    # バインドマウント
+    volumes:
+      - .:/code
+    ports:
+      - "8000:8000"
+    # webサービスが起動する前にdbサービスが起動するようになる
+    depends_on:
+      - db
